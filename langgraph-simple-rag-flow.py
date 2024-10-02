@@ -15,10 +15,6 @@ llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=1500)
 from langchain_mistralai import MistralAIEmbeddings
 embed_model = MistralAIEmbeddings()
 
-# Prepare Langfuse as debugging and tracing framework for our Generative AI application - never develop GenAI apps without that!
-from langfuse.callback import CallbackHandler
-handler = CallbackHandler()
-
 # let's attach our Qdrant Vector store
 from langchain_qdrant import QdrantVectorStore
 store_wiki = QdrantVectorStore.from_existing_collection(
