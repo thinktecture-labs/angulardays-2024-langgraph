@@ -5,6 +5,7 @@ load_dotenv()
 
 # Retrieve environment variables
 qdrant_instance_url = os.getenv('QDRANT_INSTANCE_URL')
+qdrant_api_key = os.getenv('QDRANT_API_KEY')
 
 # prepare LLM
 from langchain_openai import ChatOpenAI
@@ -24,6 +25,7 @@ store_wiki = QdrantVectorStore.from_existing_collection(
     collection_name = "wiki",
     embedding = embed_model,
     url=qdrant_instance_url,
+    api_key = qdrant_api_key,
 )
 
 # create retriever
