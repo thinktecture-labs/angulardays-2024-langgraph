@@ -51,7 +51,7 @@ def reindex(state):
         collection_name="wiki",
         force_recreate=True,
     )
-    return {"generation": "finished"}
+    return {"generation": data}
 
 from langgraph.graph import StateGraph
 workflow = StateGraph(GraphState)
