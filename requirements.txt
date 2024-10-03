@@ -7,4 +7,3 @@ langchain-mistralai==0.2.0
 langchain-qdrant==0.1.4
 langgraph==0.2.32
 feedparser
-newspaper3k
