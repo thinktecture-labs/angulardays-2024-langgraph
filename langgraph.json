@@ -2,6 +2,7 @@
   "dockerfile_lines": [],
   "graphs": {
     "simple_rag": "./langgraph-simple-rag-flow.py:graph",
+    "advanced_rag": "./langgraph-advanced-rag-flow.py:graph",
     "reindex": "./langgraph-reindex.py:graph"
   },
   "env": "./.env",
