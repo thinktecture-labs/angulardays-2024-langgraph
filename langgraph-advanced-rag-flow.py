@@ -1,14 +1,27 @@
-# Load environment variables from .env file
+# Load environment variables
+import os
 from dotenv import load_dotenv
-import os, json
-load_dotenv()
+from typing import List
+from typing_extensions import TypedDict
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import END, StateGraph
+from langchain.schema import Document
+import json
 
-# Retrieve environment variables
-qdrant_instance_url = os.getenv('QDRANT_INSTANCE_URL')
-qdrant_api_key = os.getenv('QDRANT_API_KEY')
-tavily_api_key = os.getenv('TAVILY_API_KEY')
+# Helper function for environment variables
+def get_env_variable(var_name):
+    value = os.getenv(var_name)
+    if not value:
+        raise ValueError(f"Missing environment variable: {var_name}")
+    return value
 
-# prepare LLM
+load_dotenv()  # Load environment variables from .env file
+
+qdrant_instance_url = get_env_variable('QDRANT_INSTANCE_URL')
+qdrant_api_key = get_env_variable('QDRANT_API_KEY')
+tavily_api_key = get_env_variable('TAVILY_API_KEY')
+
+# Prepare LLM
 from langchain_openai import ChatOpenAI
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=2500)
 llm_json_mode = llm.bind(response_format={"type": "json_object"})
@@ -30,9 +43,6 @@ store_wiki = QdrantVectorStore.from_existing_collection(
 wiki_retriever = store_wiki.as_retriever(search_kwargs={"k":1,})
 
 # setup graph
-from typing_extensions import TypedDict
-from typing import List
-
 class GraphState(TypedDict):
     """
     Graph state is a dictionary that contains information we want to propagate to, and modify in, each graph node.
@@ -42,15 +52,6 @@ class GraphState(TypedDict):
     answer_grade : str # Retrieved docs good for generation relevant/not_relevant
     documents : List[str] # List of retrieved documents
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import END
-
-### Helper function
-# Post-processing
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
-
-### Nodes
 ### Nodes
 def retrieve(state):
     """
@@ -66,7 +67,7 @@ def retrieve(state):
     question = state["question"]
 
     # Write retrieved documents to documents key in state
-    documents = wiki_retriever.invoke(question)
+    documents = wiki_retriever.invoke(question) or [Document(page_content="No content found")]
     return {"documents": documents}
 
 def grade(state):
@@ -206,6 +207,7 @@ def generate(state):
     print("---GENERATE---")
     question = state["question"]
     documents = state["documents"]
+    context = "\n\n".join(doc.page_content for doc in documents) if documents else "No content found"
 
     # define answer prompt
     prompt_template = """You are an assistant for question-answering tasks at ACME GmbH.
@@ -227,8 +229,7 @@ def generate(state):
       Answer:"""
 
     # RAG generation
-    docs_txt = format_docs(documents)
-    rag_prompt_formatted = prompt_template.format(context=docs_txt, question=question)
+    rag_prompt_formatted = prompt_template.format(context=context, question=question)
     generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
     return {"generation": generation}
 
@@ -290,7 +291,6 @@ def decide_retriever_ok(state):
         print("---DECISION: GENERATE---")
         return "generate"
 
-from langgraph.graph import StateGraph
 workflow = StateGraph(GraphState)
 
 # Define the nodes
