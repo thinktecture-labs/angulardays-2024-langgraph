@@ -6,7 +6,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 qdrant_instance_url = os.getenv('QDRANT_INSTANCE_URL')
+if not qdrant_instance_url:
+    raise ValueError("Missing environment variable: QDRANT_INSTANCE_URL")
+
 qdrant_api_key = os.getenv('QDRANT_API_KEY')
+if not qdrant_api_key:
+    raise ValueError("Missing environment variable: QDRANT_API_KEY")
 
 # Prepare LLM
 from langchain_openai import ChatOpenAI
@@ -52,6 +57,7 @@ from typing import List
 from typing_extensions import TypedDict
 from langchain_core.messages import HumanMessage
 from langgraph.graph import START, END, StateGraph
+from langchain.schema import Document
 
 class GraphState(TypedDict):
     """
@@ -64,6 +70,8 @@ class GraphState(TypedDict):
 # Helper function
 # Post-processing
 def format_docs(docs):
+    if not docs:
+      return "No content found"
     return "\n\n".join(doc.page_content for doc in docs)
 
 # Nodes
@@ -79,8 +87,12 @@ def retrieve(state):
     """
     question = state["question"]
 
-    # Write retrieved documents to documents key in state
+    # Write retrieved documents
     documents = wiki_retriever.invoke(question)
+
+    if not documents:
+        documents = [Document(page_content="No content found")]
+
     return {"documents": documents}
 
 def generate(state):
