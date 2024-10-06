@@ -1,13 +1,14 @@
 # Load environment variables from .env file
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
 load_dotenv()
 
-# Retrieve environment variables
 qdrant_instance_url = os.getenv('QDRANT_INSTANCE_URL')
 qdrant_api_key = os.getenv('QDRANT_API_KEY')
 
-# prepare LLM
+# Prepare LLM
 from langchain_openai import ChatOpenAI
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=1500)
 
@@ -15,17 +16,17 @@ llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=1500)
 from langchain_mistralai import MistralAIEmbeddings
 embed_model = MistralAIEmbeddings()
 
-# let's attach our Qdrant Vector store
+# Attach our Qdrant Vector store
 from langchain_qdrant import QdrantVectorStore
 store_wiki = QdrantVectorStore.from_existing_collection(
-    collection_name = "wiki",
-    embedding = embed_model,
+    collection_name="wiki",
+    embedding=embed_model,
     url=qdrant_instance_url,
-    api_key = qdrant_api_key,
+    api_key=qdrant_api_key,
 )
 
-# create retriever
-wiki_retriever = store_wiki.as_retriever(search_kwargs={"k":1,})
+# Create retriever
+wiki_retriever = store_wiki.as_retriever(search_kwargs={"k": 1})
 
 # Define prompt for RAG
 prompt_template = """You are an assistant for question-answering tasks.
@@ -46,27 +47,26 @@ Write the answer in German. Don't output an English translation.
 
 Answer:"""
 
-# setup graph
-from typing_extensions import TypedDict
+# Setup graph
 from typing import List
+from typing_extensions import TypedDict
+from langchain_core.messages import HumanMessage
+from langgraph.graph import START, END, StateGraph
 
 class GraphState(TypedDict):
     """
     Graph state is a dictionary that contains information we want to propagate to, and modify in, each graph node.
     """
-    question : str # User question
-    generation : str # LLM generation
-    documents : List[str] # List of retrieved documents
+    question: str  # User question
+    generation: str  # LLM generation
+    documents: List[str]  # List of retrieved documents
 
-from langchain_core.messages import HumanMessage
-from langgraph.graph import START, END
-
-### Helper function
+# Helper function
 # Post-processing
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
-### Nodes
+# Nodes
 def retrieve(state):
     """
     Retrieve documents from vectorstore
@@ -102,12 +102,11 @@ def generate(state):
     generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
     return {"generation": generation}
 
-from langgraph.graph import StateGraph
 workflow = StateGraph(GraphState)
 
 # Define the nodes
-workflow.add_node("retrieve", retrieve) # retrieve
-workflow.add_node("generate", generate) # generate
+workflow.add_node("retrieve", retrieve)  # retrieve
+workflow.add_node("generate", generate)  # generate
 
 # Define the edges
 workflow.add_edge(START, "retrieve")
