@@ -120,15 +120,15 @@ def web_search_angular(state):
 
     # Run open web search
     from langchain.schema import Document
-    results = search_client.search(question, search_depth="advanced", max_results=2, include_domains=["angular.dev"], include_raw_content=True)
+    results = search_client.search(question, search_depth="advanced", max_results=3, include_domains=["angular.dev"], include_raw_content=True)
 
     # List to store the generated Document objects
     documents = []
 
     # Iterate over each entry in the feed
     for entry in results["results"]:
-        # Extract the page content
-        page_content = entry.get('raw_content', 'No content')
+        # Extract the page content: prefer raw_content, fall back to content, and use default if both are empty
+        page_content = entry.get('raw_content') or entry.get('content') or "No content found"
 
         # Extract metadata
         metadata = {
