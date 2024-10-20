@@ -3,6 +3,7 @@
   "graphs": {
     "simple_rag": "./langgraph-simple-rag-flow.py:graph",
     "advanced_rag": "./langgraph-advanced-rag-flow.py:graph",
+    "advanced_rag_eu": "./langgraph-advanced-rag-flow-eu.py:graph",
     "reindex": "./langgraph-reindex.py:graph"
   },
   "env": "./.env",
