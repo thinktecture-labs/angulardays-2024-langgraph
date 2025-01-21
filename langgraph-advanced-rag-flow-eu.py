@@ -4,9 +4,23 @@ from dotenv import load_dotenv
 from typing import List
 from typing_extensions import TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import END, StateGraph
 from langchain.schema import Document
-import json
+from langchain_mistralai import ChatMistralAI
+from langchain_mistralai import MistralAIEmbeddings
+from langchain_qdrant import QdrantVectorStore
+from langgraph.graph import END, StateGraph
+from pydantic import BaseModel, Field
+from typing import Literal
+from tavily import TavilyClient
+
+class RouterResponse(BaseModel):
+    datasource: Literal["websearch", "vectorstore"] = Field(description="The source to route the question to")
+
+class GraderResponse(BaseModel):
+    binary_score: Literal["relevant", "not_relevant"] = Field(description="Indicate whether the document contains at least some information that is relevant to the question")
+
+# Load environment variables
+load_dotenv()
 
 # Helper function for environment variables
 def get_env_variable(var_name):
@@ -15,23 +29,19 @@ def get_env_variable(var_name):
         raise ValueError(f"Missing environment variable: {var_name}")
     return value
 
-load_dotenv()  # Load environment variables from .env file
-
 qdrant_instance_url = get_env_variable('QDRANT_INSTANCE_URL')
 qdrant_api_key = get_env_variable('QDRANT_API_KEY')
 tavily_api_key = get_env_variable('TAVILY_API_KEY')
 
 # Prepare LLM
-from langchain_mistralai import ChatMistralAI
 llm = ChatMistralAI(model="ministral-8b-latest", temperature=0.1, max_tokens=1500)
-llm_json_mode = llm.bind(response_format={"type": "json_object"})
+llm_question_router = llm.with_structured_output(RouterResponse)
+llm_content_grader = llm.with_structured_output(GraderResponse)
 
 # Prepare Embeddings - use the same embedding model as for ingestion
-from langchain_mistralai import MistralAIEmbeddings
 embed_model = MistralAIEmbeddings()
 
 # let's attach our Qdrant Vector store
-from langchain_qdrant import QdrantVectorStore
 store_wiki = QdrantVectorStore.from_existing_collection(
     collection_name = "wiki",
     embedding = embed_model,
@@ -63,7 +73,6 @@ def retrieve(state):
     Returns:
         state (dict): New key added to state, documents, that contains retrieved documents
     """
-    print("---RETRIEVE---")
     question = state["question"]
 
     # Write retrieved documents to documents key in state
@@ -80,7 +89,6 @@ def grade(state):
     Returns:
         state (dict): New key added to state, answer_grade, that contains grade as relevant or not_relevant
     """
-    print("---GRADE---")
     question = state["question"]
     documents = state["documents"]
 
@@ -88,17 +96,13 @@ def grade(state):
     doc_grader_instructions = """You are a grader tasked with meticulously and impartially evaluating the relevance of a retrieved document in relation to a user's question. To ensure the highest level of accuracy and usefulness, you should grade a document as relevant only if it provides sufficient and pertinent context that would enable the generation of a comprehensive and highly satisfactory answer to the question. This means the document should contain enough detailed and applicable information that directly addresses the query, allowing for a thorough and well-informed response. If the document lacks adequate context or the necessary details to formulate a very good answer, it should not be considered relevant."""
 
     # Grader prompt
-    doc_grader_prompt = """Here is the retrieved document: \n\n {document} \n\n Here is the user question: \n\n {question}.
-
-    Return JSON with single key, binary_score, that is 'relevant' or 'not_relevant' score to indicate whether the document contains enough useful information that is relevant to the question."""
+    doc_grader_prompt = """Here is the retrieved document: \n\n {document} \n\n Here is the user question: \n\n {question}."""
 
     # Prepare prompt and run grader
     doc_grader_prompt_formatted = doc_grader_prompt.format(document=documents[0].page_content, question=question)
-    result = llm_json_mode.invoke(
-        [SystemMessage(content=doc_grader_instructions)]
-        + [HumanMessage(content=doc_grader_prompt_formatted)]
-    )
-    return {"answer_grade": json.loads(result.content)['binary_score']}
+    result = llm_content_grader.invoke([SystemMessage(content=doc_grader_instructions)] + [HumanMessage(content=doc_grader_prompt_formatted)])
+
+    return {"answer_grade": result.binary_score}
 
 def web_search_angular(state):
     """
@@ -110,14 +114,11 @@ def web_search_angular(state):
     Returns:
         state (dict): New key added to state, documents, that contains retrieved documents
     """
-    print("---WEB SEARCH ANGULAR---")
     question = state["question"]
     # Instantiating your TavilyClient
-    from tavily import TavilyClient
     search_client = TavilyClient(api_key=tavily_api_key)
 
     # Run open web search
-    from langchain.schema import Document
     results = search_client.search(question, search_depth="advanced", max_results=3, include_domains=["angular.dev"], include_raw_content=True)
 
     # List to store the generated Document objects
@@ -144,7 +145,7 @@ def web_search_angular(state):
 
     # Write retrieved documents to documents key in state
 
-    return{"documents": documents}
+    return {"documents": documents}
 
 def web_search_full(state):
     """
@@ -156,14 +157,11 @@ def web_search_full(state):
     Returns:
         state (dict): New key added to state, documents, that contains retrieved documents
     """
-    print("---WEB SEARCH FULL---")
     question = state["question"]
     # Instantiating your TavilyClient
-    from tavily import TavilyClient
     search_client = TavilyClient(api_key=tavily_api_key)
 
     # Run open web search
-    from langchain.schema import Document
     results = search_client.search(question, search_depth="advanced", max_results=2)
 
     # List to store the generated Document objects
@@ -190,7 +188,7 @@ def web_search_full(state):
 
     # Write retrieved documents to documents key in state
 
-    return{"documents": documents}
+    return {"documents": documents}
 
 def generate(state):
     """
@@ -202,7 +200,6 @@ def generate(state):
     Returns:
         state (dict): New key added to state, generation, that contains LLM generation
     """
-    print("---GENERATE---")
     question = state["question"]
     documents = state["documents"]
     context = "\n\n".join(doc.page_content for doc in documents) if documents else "No content found"
@@ -235,6 +232,7 @@ def generate(state):
     # RAG generation
     rag_prompt_formatted = prompt_template.format(context=context, question=question)
     generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
+
     return {"generation": generation}
 
 ### Conditional nodes
@@ -248,28 +246,18 @@ def route_question(state):
     Returns:
         str: Next node to call
     """
-
-    print("---ROUTE QUESTION---")
     router_instructions = """You are an expert at routing a user question to a vectorstore or websearch.
 
     The vectorstore contains documents related to coding, programming, development practices, single page applications, the Angular framework, and coding guidelines for the company ACME.
 
     Use the vectorstore for any questions containing coding terms, code snippets, programming languages, or technologies relevant to development practices (even in other languages like German).
 
-    If the question is related to coding or development but not specifically covered by the vectorstore, still return 'vectorstore'. Use 'websearch' for non-coding questions.
-
-    Return JSON with a single key, "datasource," that is 'websearch' or 'vectorstore' depending on the question."""
-
-    route_question_result = llm_json_mode.invoke(
-        [SystemMessage(content=router_instructions)]
-        + [HumanMessage(content=state["question"])]
-    )
-    source = json.loads(route_question_result.content)["datasource"]
-    if source == "websearch":
-        print("---ROUTE QUESTION TO WEB_SEARCH_FULL---")
+    If the question is related to coding or development but not specifically covered by the vectorstore, still return 'vectorstore'. Use 'websearch' for non-coding questions."""
+    
+    route_question = llm_question_router.invoke([SystemMessage(content=router_instructions)] + [HumanMessage(content=state["question"])])
+    if route_question.datasource == "websearch":
         return "websearch"
-    elif source == "vectorstore":
-        print("---ROUTE QUESTION TO RETRIEVER---")
+    elif route_question.datasource == "vectorstore":
         return "vectorstore"
 
 def decide_retriever_ok(state):
@@ -282,17 +270,12 @@ def decide_retriever_ok(state):
     Returns:
         str: Binary decision for next node to call
     """
-    print("---DECIDE RETRIEVER OK---")
     answer_grade = state["answer_grade"]
 
-    if answer_grade.lower() == "not_relevant":
-        print(
-            "---DECISION: NOT ALL DOCUMENTS ARE RELEVANT TO QUESTION, INCLUDE WEB SEARCH---"
-        )
+    if answer_grade == "not_relevant":
         return "websearch"
     else:
         # We have relevant documents, so generate answer
-        print("---DECISION: GENERATE---")
         return "generate"
 
 workflow = StateGraph(GraphState)
