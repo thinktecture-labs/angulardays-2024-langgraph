@@ -23,7 +23,7 @@ tavily_api_key = get_env_variable('TAVILY_API_KEY')
 
 # Prepare LLM
 from langchain_mistralai import ChatMistralAI
-llm = ChatMistralAI(model="open-mistral-nemo", temperature=0, max_tokens=1500)
+llm = ChatMistralAI(model="ministral-8b-latest", temperature=0.1, max_tokens=1500)
 llm_json_mode = llm.bind(response_format={"type": "json_object"})
 
 # Prepare Embeddings - use the same embedding model as for ingestion
