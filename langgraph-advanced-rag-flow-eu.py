@@ -17,7 +17,7 @@ class RouterResponse(BaseModel):
     datasource: Literal["websearch", "vectorstore"] = Field(description="The source to route the question to")
 
 class GraderResponse(BaseModel):
-    binary_score: Literal["relevant", "not_relevant"] = Field(description="Indicate whether the document contains at least some information that is relevant to the question")
+    binary_score: Literal["relevant", "not_relevant"] = Field(description="If the retrieved document contains keywords or semantic meaning related to the user question, grade it as relevant; but in any other case, grade it as not relevant")
 
 # Load environment variables
 load_dotenv()
@@ -96,7 +96,7 @@ def grade(state):
     doc_grader_instructions = """You are a grader tasked with meticulously and impartially evaluating the relevance of a retrieved document in relation to a user's question. To ensure the highest level of accuracy and usefulness, you should grade a document as relevant only if it provides sufficient and pertinent context that would enable the generation of a comprehensive and highly satisfactory answer to the question. This means the document should contain enough detailed and applicable information that directly addresses the query, allowing for a thorough and well-informed response. If the document lacks adequate context or the necessary details to formulate a very good answer, it should not be considered relevant."""
 
     # Grader prompt
-    doc_grader_prompt = """Here is the retrieved document: \n\n {document} \n\n Here is the user question: \n\n {question}."""
+    doc_grader_prompt = """If the retrieved document contains keywords or semantic meaning related to the user question, grade it as relevant; but in any other case, grade it as not relevant. Here is the user question: \n\n {question}. \n\n Here is the retrieved document: \n\n {document}"""
 
     # Prepare prompt and run grader
     doc_grader_prompt_formatted = doc_grader_prompt.format(document=documents[0].page_content, question=question)
