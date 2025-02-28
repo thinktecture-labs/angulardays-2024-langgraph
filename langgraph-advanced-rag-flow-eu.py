@@ -1,20 +1,29 @@
-# Load environment variables
+# Python
 import os
 from dotenv import load_dotenv
-from typing import List
+from typing import Dict, Literal, List, Annotated
 from typing_extensions import TypedDict
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain.schema import Document
+# Pydantic
+from pydantic import BaseModel, Field
+# LangChain
+from langchain_core.messages import HumanMessage, SystemMessage, AnyMessage, ToolMessage
+from langchain_core.tools import tool
+from langchain_core.tools.base import InjectedToolCallId
 from langchain_mistralai import ChatMistralAI
 from langchain_mistralai import MistralAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
-from langgraph.graph import END, StateGraph
-from pydantic import BaseModel, Field
-from typing import Literal
+from langchain_core.documents import Document
+# LangGraph
+from langgraph.graph import END, StateGraph, MessagesState
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+from langgraph.types import Command
+# Tavily
 from tavily import TavilyClient
 
+# models
 class RouterResponse(BaseModel):
-    datasource: Literal["websearch", "vectorstore"] = Field(description="The source to route the question to")
+    datasource: Literal["external", "internal_db", "internal_tools"] = Field(description="The source to route the question to")
 
 class GraderResponse(BaseModel):
     binary_score: Literal["relevant", "not_relevant"] = Field(description="If the retrieved document contains keywords or semantic meaning related to the user question, grade it as relevant; but in any other case, grade it as not relevant")
@@ -34,7 +43,7 @@ qdrant_api_key = get_env_variable('QDRANT_API_KEY')
 tavily_api_key = get_env_variable('TAVILY_API_KEY')
 
 # Prepare LLM
-llm = ChatMistralAI(model="ministral-8b-latest", temperature=0.1, max_tokens=1500)
+llm = ChatMistralAI(model="ministral-8b-latest", temperature=0.0, max_tokens=1000)
 llm_question_router = llm.with_structured_output(RouterResponse)
 llm_content_grader = llm.with_structured_output(GraderResponse)
 
@@ -52,7 +61,8 @@ store_wiki = QdrantVectorStore.from_existing_collection(
 # create retriever
 wiki_retriever = store_wiki.as_retriever(search_kwargs={"k":1,})
 
-# setup graph
+# LangGraph elements
+## Graph State
 class GraphState(TypedDict):
     """
     Graph state is a dictionary that contains information we want to propagate to, and modify in, each graph node.
@@ -61,8 +71,86 @@ class GraphState(TypedDict):
     generation : str # LLM generation
     answer_grade : str # Retrieved docs good for generation relevant/not_relevant
     documents : List[str] # List of retrieved documents
+    trust_level: int # 1= Internal source - highly trustworthy, 2= approved externel source - trusted, 3= untrusted external source
+    project_symbol : str
+    project_id : str
+    project_name : str
+    project_manager_details : Dict[str, str]
+    messages: Annotated[List[AnyMessage], add_messages]
 
-### Nodes
+## tools for workflow
+@tool
+def get_project_details_by_project_symbol(project_symbol: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+    """
+    Lookup the project details for a given project symbol.
+    Returns a dictionary with project_symbol, project_id and project_name.
+    Example:
+     - For 'post' returns {"project_symbol": "post", "project_id": "tt-pt-25b", "project_name": "Deutsche Post AG - AI Assistent for parcel tracking"}
+     - For unknown project symbols returns {"project_symbol": None, "project_id": None, "project_name": None}
+    """
+    project_mapping = {
+        'post': ("POST","tt-pt-25b", "Deutsche Post AG - AI Assistent for parcel tracking"),
+        'siemens': ("SIEMENS","tt-si-24f", "Siemens AG - Wind Turbine Optimization"),
+        'mercedes': ("MERCEDES","tt-me-24a", "Mercedes-Benz AG - Electric Vehicle Charging Station"),
+    }
+    
+    p_symbol, p_id, p_name = project_mapping.get(project_symbol, (None, None, None))
+    return Command(
+        update={
+            # update state for project details
+            "project_symbol": p_symbol,
+            "project_id": p_id,
+            "project_name": p_name,
+            "trust_level": 1,
+            # update the message history
+            "messages": [ToolMessage(f"Found project details for project_symbol: {p_symbol} project_id: {p_id} project_name: {p_name}", tool_call_id=tool_call_id)]
+        }
+    )
+
+@tool
+def get_manager_details_by_project_id(project_id: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+    """
+    Lookup manager details based on project id.
+    Returns manager details for ids not None, empty dict otherwise.
+    """
+    details = {
+        "tt-pt-25b": {"first_name": "Alice", "last_name": "Mueller", "gender": "Frau", 
+            "email": "alice.mueller@post-ag.com", "telephone": "0123456789"},
+        "tt-si-24f": {"first_name": "Bob", "last_name": "Schmidt", "gender": "Herr", 
+            "email": "bob.schmidt@siemens.com", "telephone": "0987654321"},
+        "tt-me-24a": {"first_name": "Clara", "last_name": "Fischer", "gender": "Frau", 
+            "email": "clara.fischer@mercedes-ev.com", "telephone": "1234567890"}
+    }
+    manager_details = details.get(project_id, {})
+    return Command(
+        update={
+            # update state for manager details
+            "project_manager_details": manager_details,
+            "trust_level": 1,
+            # update the message history
+            "messages": [ToolMessage(f"Found manager details for project_id {project_id}: {manager_details}", tool_call_id=tool_call_id)]
+        }
+    )
+
+## tool nodes
+def prepare_tool_use(state: GraphState):
+    """Create a user message for tool use."""
+    question = state["question"]
+    return {"messages": [HumanMessage(content=f"Look up information for question: {question}")]}
+
+def tool_time(state: MessagesState):
+  messages = state['messages']
+  response = llm_tools.invoke(messages)
+  return {"messages": [response]}
+
+def should_continue(state: MessagesState) -> Literal["tools", "generate"]:
+  messages = state['messages']
+  last_message = messages[-1]
+  if last_message.tool_calls:
+    return "tools"
+  return "generate"
+
+## classic nodes
 def retrieve(state):
     """
     Retrieve documents from vectorstore
@@ -77,7 +165,7 @@ def retrieve(state):
 
     # Write retrieved documents to documents key in state
     documents = wiki_retriever.invoke(question) or [Document(page_content="No content found")]
-    return {"documents": documents}
+    return {"documents": documents, "trust_level": 1}
 
 def grade(state):
     """
@@ -145,7 +233,7 @@ def web_search_angular(state):
 
     # Write retrieved documents to documents key in state
 
-    return {"documents": documents}
+    return {"documents": documents, "trust_level": 2}
 
 def web_search_full(state):
     """
@@ -187,8 +275,7 @@ def web_search_full(state):
 
 
     # Write retrieved documents to documents key in state
-
-    return {"documents": documents}
+    return {"documents": documents, "trust_level": 3}
 
 def generate(state):
     """
@@ -201,8 +288,12 @@ def generate(state):
         state (dict): New key added to state, generation, that contains LLM generation
     """
     question = state["question"]
-    documents = state["documents"]
-    context = "\n\n".join(doc.page_content for doc in documents) if documents else "No content found"
+    # Check if 'documents' key exists in state, otherwise assign an empty list
+    documents = state.get("documents", [])
+    project_symbol = state["project_symbol"]
+    project_id = state["project_id"]
+    project_name = state["project_name"]
+    project_manager_details = state.get("project_manager_details", {})
 
     # define answer prompt
     prompt_template="""You are an assistant for question-answering tasks at ACME GmbH.
@@ -228,9 +319,14 @@ def generate(state):
 
     # Answer:
     """
-
+    # Prepare context string: either project details or retrieved documents depending on state
+    if documents == []:
+        docs_txt = f"Project details: Project Symbol:{project_symbol} Project ID: {project_id} Project Name: {project_name} Project Manager Details: {project_manager_details}"
+    else:
+        docs_txt = "\n\n".join(doc.page_content for doc in documents) if documents else "No content found"
+    
     # RAG generation
-    rag_prompt_formatted = prompt_template.format(context=context, question=question)
+    rag_prompt_formatted = prompt_template.format(context=docs_txt, question=question)
     generation = llm.invoke([HumanMessage(content=rag_prompt_formatted)])
 
     return {"generation": generation}
@@ -246,19 +342,21 @@ def route_question(state):
     Returns:
         str: Next node to call
     """
-    router_instructions = """You are an expert at routing a user question to a vectorstore or websearch.
+    router_instructions = """You are an expert at routing a user question depending on the intent. Choose the most appropriate datasource:
 
-    The vectorstore contains documents related to coding, programming, development practices, single page applications, the Angular framework, and coding guidelines for the company ACME.
-
-    Use the vectorstore for any questions containing coding terms, code snippets, programming languages, or technologies relevant to development practices (even in other languages like German).
-
-    If the question is related to coding or development but not specifically covered by the vectorstore, still return 'vectorstore'. Use 'websearch' for non-coding questions."""
+    'internal_db': documents related to coding, code snippets, programming, programming languages, development practices, single page applications, the Angular framework, and coding guidelines for the company ACME.
+    'internal_tools': information about projects (project names, project ids, project manager and their contact details) by ACME GmbH
+    'external': general information not covered by the topics covered by 'internal_db' or 'interal_tools'.
+    
+    If the question is related to coding or development but not specifically covered by the 'internal_db', still return 'internal_db'."""
     
     route_question = llm_question_router.invoke([SystemMessage(content=router_instructions)] + [HumanMessage(content=state["question"])])
-    if route_question.datasource == "websearch":
-        return "websearch"
-    elif route_question.datasource == "vectorstore":
-        return "vectorstore"
+    if route_question.datasource == "internal_db":
+        return "internal_db"
+    elif route_question.datasource == "internal_tools":
+        return "internal_tools"
+    elif route_question.datasource == "external":
+        return "external"
 
 def decide_retriever_ok(state):
     """
@@ -280,19 +378,28 @@ def decide_retriever_ok(state):
 
 workflow = StateGraph(GraphState)
 
-# Define the nodes
+# create tool array, tool llm and tool node with all tools
+tools = [get_project_details_by_project_symbol, get_manager_details_by_project_id]
+llm_tools = llm.bind_tools(tools)
+tool_node = ToolNode(tools)
+
+# add nodes to workflow
 workflow.add_node("retrieve", retrieve) # retrieve
 workflow.add_node("generate", generate) # generate
 workflow.add_node("grade", grade) # grade
 workflow.add_node("web_search_angular", web_search_angular) # websearch angular.dev
 workflow.add_node("web_search_full", web_search_full) # full websearch
+workflow.add_node("prepare_tool_use", prepare_tool_use)
+workflow.add_node("tool_time", tool_time)
+workflow.add_node("tools", tool_node)
 
 # Define the edges
 workflow.set_conditional_entry_point(
     route_question,
     {
-        "websearch": "web_search_full",
-        "vectorstore": "retrieve",
+        "external": "web_search_full",
+        "internal_db": "retrieve",
+        "internal_tools": "prepare_tool_use",
     },
 )
 workflow.add_edge("web_search_full", "generate")
@@ -305,6 +412,9 @@ workflow.add_conditional_edges(
         "generate": "generate",
     },
 )
+workflow.add_edge("prepare_tool_use", "tool_time")
+workflow.add_conditional_edges("tool_time", should_continue)
+workflow.add_edge("tools", "tool_time")
 workflow.add_edge("web_search_angular", "generate")
 workflow.add_edge("generate", END)
 
