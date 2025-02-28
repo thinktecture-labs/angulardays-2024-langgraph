@@ -290,9 +290,9 @@ def generate(state):
     question = state["question"]
     # Check if 'documents' key exists in state, otherwise assign an empty list
     documents = state.get("documents", [])
-    project_symbol = state["project_symbol"]
-    project_id = state["project_id"]
-    project_name = state["project_name"]
+    project_symbol = state.get("project_symbol", None)
+    project_id = state.get("project_id", None)
+    project_name = state.get("project_name", None)
     project_manager_details = state.get("project_manager_details", {})
 
     # define answer prompt
