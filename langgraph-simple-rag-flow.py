@@ -1,6 +1,6 @@
 # Python
 import os
-import argparse
+#import argparse
 from dotenv import load_dotenv
 from typing import List
 from typing_extensions import TypedDict
@@ -13,22 +13,22 @@ from langchain_qdrant import QdrantVectorStore
 # LangGraph
 from langgraph.graph import START, END, StateGraph
 # LangFuse
-from langfuse.callback import CallbackHandler
+#from langfuse.callback import CallbackHandler
 
 # set runmode
-parser = argparse.ArgumentParser(description='Script with debug flag') # Create the parser
-parser.add_argument('--testrun', action='store_true', help='Enable real run with predefined question and LangFuse tracing') # Add the testrun argument as a flag (store_true means it will be False by default)
-args = parser.parse_args() # Parse the command-line arguments
+#parser = argparse.ArgumentParser(description='Script with debug flag') # Create the parser
+#parser.add_argument('--testrun', action='store_true', help='Enable real run with predefined question and LangFuse tracing') # Add the testrun argument as a flag (store_true means it will be False by default)
+#args = parser.parse_args() # Parse the command-line arguments
 # Access the testrun value
-TESTRUN = args.testrun
+#TESTRUN = args.testrun
 
 # initialize Testrun mode with needed settings
-if TESTRUN:
-    print("Testrun mode is enabled")
-    # disable tokenizers parallelism
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    # prepare Langfuse as debugging and tracing framework for our Generative AI application - never develop GenAI apps without that!
-    handler = CallbackHandler()
+#if TESTRUN:
+#    print("Testrun mode is enabled")
+#    # disable tokenizers parallelism
+#    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+#    # prepare Langfuse as debugging and tracing framework for our Generative AI application - never develop GenAI apps without that!
+#    handler = CallbackHandler()
 
 # Load environment variables
 load_dotenv()
@@ -159,13 +159,8 @@ workflow.add_edge("generate", END)
 graph = workflow.compile()
 
 # Test workflow
-if TESTRUN:
-    result = graph.invoke({"question": "Was ist besser signal inputs oder inputs()?"}, config={"callbacks": [handler]})
-    print(result)
-    print("-" * 10)
-    print(result["generation"].content)
-    print("-" * 30)
-    result = graph.invoke({"question": "Wie viele Komponenten brauche ich mindestens für das Setup von Routing?"}, config={"callbacks": [handler]})
-    print(result)
-    print("-" * 10)
-    print(result["generation"].content)
+#if TESTRUN:
+#    result = graph.invoke({"question": "Was ist besser signal inputs oder inputs()?"}, config={"callbacks": [handler]})
+#    print(result)
+#    print("-" * 10)
+#    print(result["generation"].content)

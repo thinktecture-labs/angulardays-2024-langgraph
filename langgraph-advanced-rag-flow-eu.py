@@ -1,6 +1,6 @@
 # Python
 import os
-import argparse
+#import argparse
 import requests
 from dotenv import load_dotenv
 from typing import Dict, Literal, List, Annotated
@@ -20,24 +20,24 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 # LangFuse
-from langfuse.callback import CallbackHandler
+#from langfuse.callback import CallbackHandler
 # Tavily
 from tavily import TavilyClient
 
 # set runmode
-parser = argparse.ArgumentParser(description='Script with debug flag') # Create the parser
-parser.add_argument('--testrun', action='store_true', help='Enable real run with predefined question and LangFuse tracing') # Add the testrun argument as a flag (store_true means it will be False by default)
-args = parser.parse_args() # Parse the command-line arguments
+#parser = argparse.ArgumentParser(description='Script with debug flag') # Create the parser
+#parser.add_argument('--testrun', action='store_true', help='Enable real run with predefined question and LangFuse tracing') # Add the testrun argument as a flag (store_true means it will be False by default)
+#args = parser.parse_args() # Parse the command-line arguments
 # Access the testrun value
-TESTRUN = args.testrun
+#TESTRUN = args.testrun
 
 # initialize Testrun mode with needed settings
-if TESTRUN:
-    print("Testrun mode is enabled")
-    # disable tokenizers parallelism
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    # prepare Langfuse as debugging and tracing framework for our Generative AI application - never develop GenAI apps without that!
-    handler = CallbackHandler()
+#if TESTRUN:
+#    print("Testrun mode is enabled")
+#    # disable tokenizers parallelism
+#    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+#    # prepare Langfuse as debugging and tracing framework for our Generative AI application - never develop GenAI apps without that!
+#    handler = CallbackHandler()
 
 # models
 class RouterResponse(BaseModel):
@@ -454,10 +454,10 @@ workflow.add_edge("generate", END)
 graph = workflow.compile()
 
 # Test workflow
-if TESTRUN:
-    result = graph.invoke({"question": "Wie lautet Vorname und Telefonnummer des Ansprechpartners für das Post-Projekt?"}, config={"callbacks": [handler]})
-    #result = graph.invoke({"question": "test"}, config={"callbacks": [handler]})
-    # output everything
-    print(result)
-    print("-" * 10)
-    print(result["generation"].content)
+#if TESTRUN:
+#    result = graph.invoke({"question": "Wie lautet Vorname und Telefonnummer des Ansprechpartners für das Post-Projekt?"}, config={"callbacks": [handler]})
+#    #result = graph.invoke({"question": "test"}, config={"callbacks": [handler]})
+#    # output everything
+#    print(result)
+#    print("-" * 10)
+#    print(result["generation"].content)
