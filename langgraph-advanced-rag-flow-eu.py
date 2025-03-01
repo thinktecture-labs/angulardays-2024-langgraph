@@ -1,5 +1,7 @@
 # Python
 import os
+import argparse
+import requests
 from dotenv import load_dotenv
 from typing import Dict, Literal, List, Annotated
 from typing_extensions import TypedDict
@@ -7,7 +9,6 @@ from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 # LangChain
 from langchain_core.messages import HumanMessage, SystemMessage, AnyMessage, ToolMessage
-from langchain_core.tools import tool
 from langchain_core.tools.base import InjectedToolCallId
 from langchain_mistralai import ChatMistralAI
 from langchain_mistralai import MistralAIEmbeddings
@@ -18,8 +19,25 @@ from langgraph.graph import END, StateGraph, MessagesState
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
+# LangFuse
+from langfuse.callback import CallbackHandler
 # Tavily
 from tavily import TavilyClient
+
+# set runmode
+parser = argparse.ArgumentParser(description='Script with debug flag') # Create the parser
+parser.add_argument('--testrun', action='store_true', help='Enable real run with predefined question and LangFuse tracing') # Add the testrun argument as a flag (store_true means it will be False by default)
+args = parser.parse_args() # Parse the command-line arguments
+# Access the testrun value
+TESTRUN = args.testrun
+
+# initialize Testrun mode with needed settings
+if TESTRUN:
+    print("Testrun mode is enabled")
+    # disable tokenizers parallelism
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    # prepare Langfuse as debugging and tracing framework for our Generative AI application - never develop GenAI apps without that!
+    handler = CallbackHandler()
 
 # models
 class RouterResponse(BaseModel):
@@ -43,7 +61,7 @@ qdrant_api_key = get_env_variable('QDRANT_API_KEY')
 tavily_api_key = get_env_variable('TAVILY_API_KEY')
 
 # Prepare LLM
-llm = ChatMistralAI(model="ministral-8b-latest", temperature=0.0, max_tokens=1000)
+llm = ChatMistralAI(model="mistral-small-latest", temperature=0.0, max_tokens=1000)
 llm_question_router = llm.with_structured_output(RouterResponse)
 llm_content_grader = llm.with_structured_output(GraderResponse)
 
@@ -79,22 +97,31 @@ class GraphState(TypedDict):
     messages: Annotated[List[AnyMessage], add_messages]
 
 ## tools for workflow
-@tool
 def get_project_details_by_project_symbol(project_symbol: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
-    Lookup the project details for a given project symbol.
-    Returns a dictionary with project_symbol, project_id and project_name.
-    Example:
-     - For 'post' returns {"project_symbol": "post", "project_id": "tt-pt-25b", "project_name": "Deutsche Post AG - AI Assistent for parcel tracking"}
-     - For unknown project symbols returns {"project_symbol": None, "project_id": None, "project_name": None}
+    Lookup the project details for a given project symbol
+    Returns a dictionary with project_symbol, project_id and project_name
+    For unknown project symbols returns {"project_symbol": None, "project_id": None, "project_name": None}
     """
-    project_mapping = {
-        'post': ("POST","tt-pt-25b", "Deutsche Post AG - AI Assistent for parcel tracking"),
-        'siemens': ("SIEMENS","tt-si-24f", "Siemens AG - Wind Turbine Optimization"),
-        'mercedes': ("MERCEDES","tt-me-24a", "Mercedes-Benz AG - Electric Vehicle Charging Station"),
-    }
+    # call API for project details
+    api_url = f"https://tt-project-api.azurewebsites.net/projects/{project_symbol.lower()}"
     
-    p_symbol, p_id, p_name = project_mapping.get(project_symbol, (None, None, None))
+    try:
+        response = requests.get(api_url)
+        if response.status_code == 200:
+            data = response.json()
+            p_symbol = data.get('project_symbol')
+            p_id = data.get('project_id')
+            p_name = data.get('project_name')
+        else:
+            # API returned error or no data found
+            p_symbol, p_id, p_name = None, None, None
+    except Exception as e:
+        # Handle any exceptions (connection errors, etc.)
+        print(f"Error fetching project details: {e}")
+        p_symbol, p_id, p_name = None, None, None
+
+    # return results to state and update message stack
     return Command(
         update={
             # update state for project details
@@ -107,21 +134,27 @@ def get_project_details_by_project_symbol(project_symbol: str, tool_call_id: Ann
         }
     )
 
-@tool
 def get_manager_details_by_project_id(project_id: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
-    Lookup manager details based on project id.
+    Lookup manager details based on project_id.
     Returns manager details for ids not None, empty dict otherwise.
     """
-    details = {
-        "tt-pt-25b": {"first_name": "Alice", "last_name": "Mueller", "gender": "Frau", 
-            "email": "alice.mueller@post-ag.com", "telephone": "0123456789"},
-        "tt-si-24f": {"first_name": "Bob", "last_name": "Schmidt", "gender": "Herr", 
-            "email": "bob.schmidt@siemens.com", "telephone": "0987654321"},
-        "tt-me-24a": {"first_name": "Clara", "last_name": "Fischer", "gender": "Frau", 
-            "email": "clara.fischer@mercedes-ev.com", "telephone": "1234567890"}
-    }
-    manager_details = details.get(project_id, {})
+    # call API for manager details
+    api_url = f"https://tt-project-api.azurewebsites.net/project-chairs/{project_id.lower()}"
+    
+    try:
+        response = requests.get(api_url)
+        if response.status_code == 200:
+            manager_details = response.json()
+        else:
+            # API returned error or no data found
+            manager_details = {}
+    except Exception as e:
+        # Handle any exceptions (connection errors, etc.)
+        print(f"Error fetching project details: {e}")
+        manager_details = {}
+        
+    # return results to state and update message stack
     return Command(
         update={
             # update state for manager details
@@ -232,7 +265,6 @@ def web_search_angular(state):
 
 
     # Write retrieved documents to documents key in state
-
     return {"documents": documents, "trust_level": 2}
 
 def web_search_full(state):
@@ -420,3 +452,12 @@ workflow.add_edge("generate", END)
 
 # Compile
 graph = workflow.compile()
+
+# Test workflow
+if TESTRUN:
+    result = graph.invoke({"question": "Wie lautet Vorname und Telefonnummer des Ansprechpartners für das Post-Projekt?"}, config={"callbacks": [handler]})
+    #result = graph.invoke({"question": "test"}, config={"callbacks": [handler]})
+    # output everything
+    print(result)
+    print("-" * 10)
+    print(result["generation"].content)
