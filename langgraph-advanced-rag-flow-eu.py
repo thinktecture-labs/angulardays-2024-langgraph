@@ -100,8 +100,10 @@ class GraphState(TypedDict):
 def get_project_details_by_project_symbol(project_symbol: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
     Lookup the project details for a given project symbol
-    Returns a dictionary with project_symbol, project_id and project_name
-    For unknown project symbols returns {"project_symbol": None, "project_id": None, "project_name": None}
+    Identify keywords such as "Projekt", "Vorhaben", "Initiative", or "Aufgabe" in the question.
+    The project symbol is usually the word immediately preceding or following these keywords. In cases like "ABC-Projekt", extract the part before the hyphen (i.e. "ABC").
+    Returns a dictionary with project_symbol, project_id and name
+    For unknown project symbols returns {"project_symbol": None, "project_id": None, "name": None}
     """
     # call API for project details
     api_url = f"https://tt-project-api.azurewebsites.net/projects/{project_symbol.lower()}"
@@ -112,7 +114,7 @@ def get_project_details_by_project_symbol(project_symbol: str, tool_call_id: Ann
             data = response.json()
             p_symbol = data.get('project_symbol')
             p_id = data.get('project_id')
-            p_name = data.get('project_name')
+            p_name = data.get('name')
         else:
             # API returned error or no data found
             p_symbol, p_id, p_name = None, None, None
@@ -455,8 +457,7 @@ graph = workflow.compile()
 
 # Test workflow
 #if TESTRUN:
-#    result = graph.invoke({"question": "Wie lautet Vorname und Telefonnummer des Ansprechpartners für das Post-Projekt?"}, config={"callbacks": [handler]})
-#    #result = graph.invoke({"question": "test"}, config={"callbacks": [handler]})
+#    result = graph.invoke({"question": "Wer leitet das Post-Projekt?"}, config={"callbacks": [handler]})
 #    # output everything
 #    print(result)
 #    print("-" * 10)
